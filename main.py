@@ -21,16 +21,16 @@ import database
 import logging
 import json
 
-DEBUG = int(os.environ.get('DEBUG'))
+PROD = int(os.environ.get('PROD'))
 
 # https://www.fullstackpython.com/blog/build-first-slack-bot-python.html
 # https://github.com/slackapi/python-message-menu-example/blob/master/example.py
 
 # instantiate Slack client
-if DEBUG:
-    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_DEBUG'))
+if PROD:
+    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_PROD'))
 else:
-    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN'))
+    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_DEBUG'))
 bot_id = None
 
 RTM_READ_DELAY = 1 # 1 second delay between reading from RTM
@@ -72,12 +72,6 @@ def row_from_time(time):
             break
 
     return TIME_ROW
-
-def name_to_id(name):
-     return database.data["users"]["name_to_id"].get(name, None)
-
-def id_to_name(user_id):
-     return database.data["users"]["id_to_name"].get(user_id, None)
 
 def parse_bot_commands(slack_events):
     """
@@ -166,8 +160,6 @@ def handle_command(input_string, channel, user):
     elif command == "help":
         response = help()
 
-    database.save_database()
-
     # # testing something out
     # username = slack_client.api_call(
     #     "users.info",
@@ -185,10 +177,13 @@ def handle_command(input_string, channel, user):
 @check_channel("shifts")
 def sub(channel, user, shift):
     """
+    /sub <date> <time>
+    """
+    # TODO: add time check for past
+    """
     Handles shift substitutes
     user: str (user id)
     shift: tuple of (day, shift time), both str
-    TODO: add time check for past
     """
     (date, time) = shift
     TIME_ROW = row_from_time(time)
@@ -201,7 +196,7 @@ def sub(channel, user, shift):
     elif DATE_COLUMN is None:
         return "Invalid date specified."
 
-    name = id_to_name(user)
+    name = database.id_to_name(user)
     if name is None:
         return "ERROR: Please rerun register-users"
 
@@ -243,7 +238,7 @@ def unsub(channel, user, shift):
     elif DATE_COLUMN is None:
         return "Invalid date specified."
 
-    name = id_to_name(user)
+    name = database.id_to_name(user)
     if name is None:
         return "ERROR: Please rerun register-users"
 
@@ -286,7 +281,7 @@ def take_shift(channel, user, shift):
     elif DATE_COLUMN is None:
         return "Invalid date specified."
 
-    name = id_to_name(user_to_replace)
+    name = database.id_to_name(user_to_replace)
     if name is None:
         return "ERROR: Please rerun register-users"
 
@@ -305,14 +300,14 @@ def take_shift(channel, user, shift):
     if person is None:
         return "Either the user you specified has already found a replacement, or is not looking for one."
 
-    sheet.update_cell(person.row, person.col, f'{id_to_name(user)}')
+    sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)}')
 
     return f'<@{user_to_replace}>\'s {date} {time} shift replaced by <@{user}>'
 
 @check_channel("shift-managers")
 def register_users(channel):
     """
-    Registers users in a given channel to pickle database.
+    Registers users to database
     Puts in both ids -> name and name -> id.
     In the case of first name collisions, last names will be used.
     This is to ensure consistency with the spreadsheet
@@ -327,8 +322,8 @@ def register_users(channel):
             user_name = name[0]
         else:
             user_name = name[1]
-        database.data["users"]["id_to_name"][user_id] = user_name
-        database.data["users"]["name_to_id"][user_name] = user_id
+        user = {"name": user_name, "id": user_id}
+        database.add_user(user)
     return "Registered names to IDs."
 
 @check_channel("shift-managers")
@@ -345,7 +340,7 @@ def noshow(channel, user, shift):
     elif DATE_COLUMN is None:
         return "Invalid date specified."
 
-    name = id_to_name(checkoff_user)
+    name = database.id_to_name(checkoff_user)
     if name is None:
         return "ERROR: Please rerun register-users"
 
@@ -364,14 +359,15 @@ def noshow(channel, user, shift):
     if person is None:
         return "Either that user did not have this shift, or is already marked off."
 
-    sheet.update_cell(person.row, person.col, f'{id_to_name(user)} NOSHOW')
+    sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)} NOSHOW')
 
     return f'<@{checkoff_user}> marked as noshow by <@{user}>'
 
     return "Not implemented yet."
 
 def register_channel(channel_name, channel_id):
-    database.data["channels"][channel_id] = channel_name
+    channel = {"name": channel_name, "id": channel_id}
+    database.add_channel(channel)
     return f'Channel registered as {channel_id}'
 
 @check_channel("shifts")
@@ -403,7 +399,7 @@ def get_shifts(date, channel):
         if shift is not "":
             if shift[-1] == "*":
                 shift = shift[:-1]
-            user_id = database.data["users"]["name_to_id"].get(shift, None)
+            user_id = database.name_to_id(shift)
             if user_id:
                 user = f'<@{user_id}>'
             else:
@@ -416,7 +412,6 @@ def get_shifts(date, channel):
         output += f'*{time}*: {people}\n'
     return output
 
-@parameters(args=[0])
 def clean_database():
     database.clean_database()
     return "Cleaned database."
@@ -436,7 +431,8 @@ def main():
     sheet = client.open("Spring 2019 Recruitment Master").sheet1
 
     database.load_database()
-    print(database.data)
+    print("CHANNELS:", [record for record in database.channels.find()])
+    print("USERS:", [record for record in database.users.find()])
 
     # slack portion
     if slack_client.rtm_connect(with_team_state=False):
@@ -450,8 +446,6 @@ def main():
     else:
         print("Connection failed. Exception traceback printed above.")
 
-    database.save_database()
-
 if __name__ == '__main__':
     try:
         main()
@@ -459,5 +453,3 @@ if __name__ == '__main__':
         print('Shutting Down')
     except:
         logging.exception("Fatal Exception Occurred")
-    finally:
-        database.save_database()
