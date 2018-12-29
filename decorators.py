@@ -2,6 +2,7 @@ import database
 from functools import wraps
 
 valid_commands = {}
+help_pages = {}
 
 # checks channel
 def channel(channel_check):
@@ -18,8 +19,6 @@ def arguments(params, error_message="Number of parameters incorrect."):
     def decorator_checked_parameters(func):
         @wraps(func)
         def wrapper_function(command_parts, *args, **kwargs):
-            print(command_parts)
-            print(len(command_parts))
             if len(command_parts) not in params:
                 return error_message
             return func(command_parts=command_parts, *args, **kwargs)
@@ -29,6 +28,7 @@ def arguments(params, error_message="Number of parameters incorrect."):
 def command(func):
     name = func.__name__.replace("_", "-")
     valid_commands[name] = func
+    help_pages[name] = func.__doc__
     def wrapper_function(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper_function

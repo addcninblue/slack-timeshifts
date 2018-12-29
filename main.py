@@ -126,14 +126,12 @@ def handle_command(input_string, channel, user):
 @channel(["shifts"])
 def sub(channel, user, command_parts):
     """
-    /sub <date> <time>
+    *sub* <date> <time>
+    > Handles shift substitutes
+    > user: str (user id)
+    > shift: tuple of (day, shift time), both str
     """
     # TODO: add time check for past
-    """
-    Handles shift substitutes
-    user: str (user id)
-    shift: tuple of (day, shift time), both str
-    """
     (date, time) = command_parts
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
@@ -172,11 +170,12 @@ def sub(channel, user, command_parts):
 @channel(["shifts"])
 def unsub(channel, user, command_parts):
     """
-    Handles shift substitutes
-    user: str (user id)
-    command_parts: tuple of (day, shift time), both str
-    TODO: add time check for past
+    *unsub* <date> <time>
+    > Handles shift substitutes
+    > user: str (user id)
+    > command_parts: tuple of (day, shift time), both str
     """
+    # TODO: add time check for past
     (date, time) = command_parts
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
@@ -214,12 +213,13 @@ def unsub(channel, user, command_parts):
 @channel(["shifts"])
 def take_shift(channel, user, command_parts):
     """
-    Handles shift substitutes
-    user: str (user id)
-    command_parts: tuple of (day, shift time), both str
-    TODO: add time check for past
-    TODO: check that they aren't already in that shift
+    *take_shift* <user> <date> <time>
+    > Handles shift substitutes
+    > user: str (user id)
+    > command_parts: tuple of (day, shift time), both str
     """
+    # TODO: add time check for past
+    # TODO: check that they aren't already in that shift
     (user_to_replace, date, time) = command_parts
     user_to_replace = user_to_replace[2:-1] # gets rid of @<>
     TIME_ROW = row_from_time(time)
@@ -240,7 +240,6 @@ def take_shift(channel, user, command_parts):
     schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
     person = None
     for t, p in zip(schedule_times, schedule_people):
-        print(t, p, name)
         # if p.value.split(" ")[0][:-1] == name:
         if p.value[0:len(name)] == name:
             person = p
@@ -259,10 +258,11 @@ def take_shift(channel, user, command_parts):
 @channel(["shift-managers"])
 def register_users(channel, user, command_parts):
     """
-    Registers users to database
-    Puts in both ids -> name and name -> id.
-    In the case of first name collisions, last names will be used.
-    This is to ensure consistency with the spreadsheet
+    *register_users*
+    > Registers users to database
+    > Puts in both ids -> name and name -> id.
+    > In the case of first name collisions, last names will be used.
+    > This is to ensure consistency with the spreadsheet
     """
     members = slack_client.api_call("users.list")["members"]
     for member in members:
@@ -281,6 +281,10 @@ def register_users(channel, user, command_parts):
 @command
 @channel(["shift-managers"])
 def noshow(channel, user, command_parts):
+    """
+    *noshow* <user>
+    > Marks user as noshow on spreadsheet
+    """
     (checkoff_user, date, time) = command_parts
     checkoff_user = checkoff_user[2:-1] # gets rid of @<>
     TIME_ROW = row_from_time(time)
@@ -301,7 +305,6 @@ def noshow(channel, user, command_parts):
     schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
     person = None
     for t, p in zip(schedule_times, schedule_people):
-        print(t, p, name)
         # if p.value.split(" ")[0] == name:
         if p.value[0:len(name)] == name:
             person = p
@@ -321,6 +324,10 @@ def noshow(channel, user, command_parts):
 @command
 @arguments([0])
 def register_channel(channel, user, command_parts):
+    """
+    *register-channel*
+    > Registers channel for script to use
+    """
     channel_name = slack_client.api_call("channels.info", channel=channel)["channel"]["name"]
     channel_id = channel
     channel = {"name": channel_name, "id": channel_id}
@@ -332,7 +339,8 @@ def register_channel(channel, user, command_parts):
 @channel(["shift-managers", "shifts"])
 def shifts(channel, user, command_parts):
     """
-    Returns shifts from given date
+    *shifts* <date>
+    > Returns shifts from given date
     """
     date = command_parts[0]
     DATE_COLUMN = col_from_date(date)
@@ -375,13 +383,34 @@ def shifts(channel, user, command_parts):
 @channel(["shift-managers"])
 @arguments([0])
 def clean(channel, user, command_parts):
+    """
+    *clean*
+    > Drops all databases.
+    > Don't use if you don't know what you're doing
+    """
     database.clean_database()
     return "Cleaned database."
 
 @command
 @arguments([0])
 def help(channel, user, command_parts):
+    """
+    *help*
+    > Help pages
+    """
     return "*To find sub*: sub <date> <time>\n*To take shift*: take-shift <user> <date> <time>\n*To show shifts*: shifts <today | tomorrow | date>"
+
+@command
+@arguments([0])
+def all_commands(channel, user, command_parts):
+    """
+    *all-commands*
+    > Prints all commands
+    """
+    output = ""
+    for title, content in decorators.help_pages.items():
+        output += f'{content}\n'
+    return output
 
 def main():
     global bot_id
