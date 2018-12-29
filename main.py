@@ -12,7 +12,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # decorators
-from decorators import check_channel, parameters
+from decorators import channel, arguments, command
+import decorators
 
 # database
 import database
@@ -107,65 +108,12 @@ def handle_command(input_string, channel, user):
 
     (command, *command_parts) = input_string.split(" ")
 
-    if command == "sub":
-        if len(command_parts) == 2:
-            response = sub(channel=channel, user=user, shift=command_parts)
-        else:
-            response = "Syntax is *@Shift Manager sub <date> <time>*\nFor example, try @Shift Manager 1/27 10:30"
-
-    elif command == "unsub":
-        if len(command_parts) == 2:
-            response = unsub(channel=channel, user=user, shift=command_parts)
-        else:
-            response = "Syntax is *@Shift Manager unsub <date> <time>*\nFor example, try @Shift Manager 1/27 10:30"
-
-    elif command == "take-shift":
-        if len(command_parts) == 3:
-            response = take_shift(channel=channel, user=user, shift=command_parts)
-        else:
-            response = "Syntax is *@Shift Manager take-shift <user> <time>*"
-
-    elif command == "register-channel":
-        if len(command_parts) == 1:
-            response = register_channel(command_parts[0], channel)
-        else:
-            response = "Syntax was incorrect."
-
-    elif command == "register-users":
-        if len(command_parts) == 0:
-            response = register_users(channel)
-        else:
-            response = "Syntax was incorrect."
-
-    elif command == "noshow":
-        if len(command_parts) == 3:
-            response = noshow(channel=channel, user=user, shift=command_parts)
-        else:
-            response = "Syntax is *@Shift Manager noshow <user> <date> <time>*"
-
-    elif command == "shifts":
-        if len(command_parts) == 1:
-            if command_parts[0] == "today":
-                response = get_shifts(channel=channel, date=f'{datetime.date.today():%-m/%-d}')
-            elif command_parts[0] == "tomorrow":
-                response = get_shifts(channel=channel, date=f'{datetime.date.today()+datetime.timedelta(days=1):%-m/%-d}')
-            else:
-                response = get_shifts(channel=channel, date=command_parts[0])
-        else:
-            response = "Syntax was incorrect."
-
-    elif command == "clean":
-        response = clean_database()
-
-    elif command == "help":
-        response = help()
-
-    # # testing something out
-    # username = slack_client.api_call(
-    #     "users.info",
-    #     user=user
-    # )['user']['profile']['display_name'] or None
-    # response = f'@{username}'
+    if command in decorators.valid_commands:
+        response = decorators.valid_commands[command](
+            channel=channel,
+            user=user,
+            command_parts=command_parts
+        )
 
     # Sends the response back to the channel
     slack_client.api_call(
@@ -174,8 +122,9 @@ def handle_command(input_string, channel, user):
         text=response or default_response
     )
 
-@check_channel("shifts")
-def sub(channel, user, shift):
+@command
+@channel(["shifts"])
+def sub(channel, user, command_parts):
     """
     /sub <date> <time>
     """
@@ -185,7 +134,7 @@ def sub(channel, user, shift):
     user: str (user id)
     shift: tuple of (day, shift time), both str
     """
-    (date, time) = shift
+    (date, time) = command_parts
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
 
@@ -219,15 +168,16 @@ def sub(channel, user, shift):
 
     return f'If anyone can substitute for <@{user}>, please respond with *@Shift Manager take-shift <@{user}> {date} {time}*'
 
-@check_channel("shifts")
-def unsub(channel, user, shift):
+@command
+@channel(["shifts"])
+def unsub(channel, user, command_parts):
     """
     Handles shift substitutes
     user: str (user id)
-    shift: tuple of (day, shift time), both str
+    command_parts: tuple of (day, shift time), both str
     TODO: add time check for past
     """
-    (date, time) = shift
+    (date, time) = command_parts
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
 
@@ -260,16 +210,17 @@ def unsub(channel, user, shift):
 
     return f'Not looking for substitutes for <@{user}> anymore.'
 
-@check_channel("shifts")
-def take_shift(channel, user, shift):
+@command
+@channel(["shifts"])
+def take_shift(channel, user, command_parts):
     """
     Handles shift substitutes
     user: str (user id)
-    shift: tuple of (day, shift time), both str
+    command_parts: tuple of (day, shift time), both str
     TODO: add time check for past
     TODO: check that they aren't already in that shift
     """
-    (user_to_replace, date, time) = shift
+    (user_to_replace, date, time) = command_parts
     user_to_replace = user_to_replace[2:-1] # gets rid of @<>
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
@@ -304,8 +255,9 @@ def take_shift(channel, user, shift):
 
     return f'<@{user_to_replace}>\'s {date} {time} shift replaced by <@{user}>'
 
-@check_channel("shift-managers")
-def register_users(channel):
+@command
+@channel(["shift-managers"])
+def register_users(channel, user, command_parts):
     """
     Registers users to database
     Puts in both ids -> name and name -> id.
@@ -326,9 +278,10 @@ def register_users(channel):
         database.add_user(user)
     return "Registered names to IDs."
 
-@check_channel("shift-managers")
-def noshow(channel, user, shift):
-    (checkoff_user, date, time) = shift
+@command
+@channel(["shift-managers"])
+def noshow(channel, user, command_parts):
+    (checkoff_user, date, time) = command_parts
     checkoff_user = checkoff_user[2:-1] # gets rid of @<>
     TIME_ROW = row_from_time(time)
     DATE_COLUMN = col_from_date(date)
@@ -365,17 +318,23 @@ def noshow(channel, user, shift):
 
     return "Not implemented yet."
 
-def register_channel(channel_name, channel_id):
+@command
+@arguments([0])
+def register_channel(channel, user, command_parts):
+    channel_name = slack_client.api_call("channels.info", channel=channel)["channel"]["name"]
+    channel_id = channel
     channel = {"name": channel_name, "id": channel_id}
     database.add_channel(channel)
     return f'Channel registered as {channel_id}'
 
-@check_channel("shifts")
-def get_shifts(date, channel):
+@command
+@arguments([1])
+@channel(["shift-managers", "shifts"])
+def shifts(channel, user, command_parts):
     """
     Returns shifts from given date
     """
-
+    date = command_parts[0]
     DATE_COLUMN = col_from_date(date)
 
     if DATE_COLUMN is None:
@@ -412,11 +371,16 @@ def get_shifts(date, channel):
         output += f'*{time}*: {people}\n'
     return output
 
-def clean_database():
+@command
+@channel(["shift-managers"])
+@arguments([0])
+def clean(channel, user, command_parts):
     database.clean_database()
     return "Cleaned database."
 
-def help():
+@command
+@arguments([0])
+def help(channel, user, command_parts):
     return "*To find sub*: sub <date> <time>\n*To take shift*: take-shift <user> <date> <time>\n*To show shifts*: shifts <today | tomorrow | date>"
 
 def main():
