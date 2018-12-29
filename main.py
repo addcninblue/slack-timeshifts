@@ -19,6 +19,7 @@ import database
 
 # etc
 import logging
+import json
 
 DEBUG = int(os.environ.get('DEBUG'))
 
@@ -430,7 +431,7 @@ def main():
     # authenticate with api
     scope = ['https://spreadsheets.google.com/feeds',
              'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name('client_secret.json', scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(os.environ.get('GOOGLE_API_CREDS')), scope)
     client = gspread.authorize(creds)
     sheet = client.open("Spring 2019 Recruitment Master").sheet1
 
