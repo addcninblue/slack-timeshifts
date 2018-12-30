@@ -22,6 +22,7 @@ import database
 import logging
 import pprint
 from threading import Thread
+import time
 
 PROD = int(os.environ.get('PROD'))
 
@@ -78,54 +79,6 @@ def row_from_time(time):
             break
 
     return TIME_ROW
-
-def parse_bot_commands(slack_events):
-    """
-    Looks through all commands and chooses to parse only @mentions
-    Calls parse_direct_mention with actual message content
-    """
-    for event in slack_events:
-        print(event)
-        if event["type"] == "message" and not "subtype" in event:
-            user_id, message = parse_direct_mention(event["text"])
-            if user_id == bot_id:
-                return message, event["channel"], event["user"]
-    return None, None, None
-
-def parse_direct_mention(message):
-    """
-    Parses @mentions
-    """
-    matches = re.search(MENTION_REGEX, message)
-    # the first group contains the username, the second group contains the remaining message
-    return (matches.group(1), matches.group(2).strip()) if matches else (None, None)
-
-def handle_command(input_string, channel, user):
-    """
-    Executes bot command if the command is known
-    """
-    # Default response is help text for the user
-    default_response = "Not sure what you mean. Try *help*."
-
-    response = None
-    # handle responses here
-    print(f'command: {input_string}, channel: {channel}, user: {user}')
-
-    (command, *command_parts) = input_string.split(" ")
-
-    if command in decorators.valid_commands:
-        response = decorators.valid_commands[command](
-            channel=channel,
-            user=user,
-            command_parts=command_parts
-        )
-
-    # Sends the response back to the channel
-    slack_client.api_call(
-        "chat.postMessage",
-        channel=channel,
-        text=response or default_response
-    )
 
 @command
 @arguments([2])
@@ -539,11 +492,11 @@ def commands():
             response_url=response_url
         )
 
-    # http://flask.pocoo.org/docs/1.0/patterns/deferredcallbacks/
-
-    # link to previously written functions
-
     return response
+
+@app.route("/")
+def root():
+    return "OK"
 
 def main():
     global bot_id
@@ -559,6 +512,17 @@ def main():
     database.load_database()
     print("CHANNELS:", [record for record in database.channels.find()])
     print("USERS:", [record for record in database.users.find()])
+
+    if PROD:
+        website = os.environ.get('WEBSITE_PROD')
+    else:
+        website = os.environ.get('WEBSITE_DEBUG')
+    def ping(website):
+        while True:
+            requests.get(website)
+            time.sleep(36000)
+    ping = Thread(target=ping, kwargs={"website": website})
+    ping.start()
 
 main()
 
