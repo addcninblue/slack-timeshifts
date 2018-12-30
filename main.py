@@ -1,18 +1,18 @@
 # slackbot
-from flask import Flask, request, make_response, Response
 import os
-import json
-import time
 import re
-from slackclient import SlackClient
 import datetime
+from flask import Flask, request, after_this_request, jsonify
+import requests
+from slackclient import SlackClient
+import json
 
 # gsheets
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # decorators
-from decorators import channel, arguments, command
+from decorators import channel, arguments, command, threaded
 import decorators
 
 # database
@@ -20,7 +20,8 @@ import database
 
 # etc
 import logging
-import json
+import pprint
+from threading import Thread
 
 PROD = int(os.environ.get('PROD'))
 
@@ -30,12 +31,10 @@ PROD = int(os.environ.get('PROD'))
 # instantiate Slack client
 if PROD:
     slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_PROD'))
+    SLACK_SIGNING_SECRET = os.environ.get("SLACK_BOT_SIGNING_SECRET_PROD")
 else:
     slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_DEBUG'))
-bot_id = None
-
-RTM_READ_DELAY = 1 # 1 second delay between reading from RTM
-MENTION_REGEX = "^<@(|[WU].+?)>(.*)"
+    SLACK_SIGNING_SECRET = os.environ.get("SLACK_BOT_SIGNING_SECRET_DEBUG")
 
 # instantiate google sheets
 sheet = None
@@ -49,6 +48,12 @@ FLYERING_ROW_END = 86
 TABLING_ROW_START = 24
 TABLING_ROW_END = 83
 MAX_PER_SHIFT = 4
+# https://github.com/datadesk/slack-buttons-example/blob/master/app.py
+
+# Flask
+app = Flask(__name__)
+
+# TODO security: https://api.slack.com/docs/verifying-requests-from-slack
 
 def col_from_date(date):
     DATE_COLUMN = None
@@ -124,51 +129,72 @@ def handle_command(input_string, channel, user):
 
 @command
 @channel(["shifts"])
-def sub(channel, user, command_parts):
+def sub(channel, user, command_parts, response_url):
+    sub_helper(channel, user, command_parts, response_url)
+    return jsonify(
+        text="Handling substitute."
+    )
+
+@threaded
+def sub_helper(channel, user, command_parts, response_url):
     """
     *sub* <date> <time>
     > Handles shift substitutes
-    > user: str (user id)
-    > shift: tuple of (day, shift time), both str
     """
     # TODO: add time check for past
-    (date, time) = command_parts
-    TIME_ROW = row_from_time(time)
-    DATE_COLUMN = col_from_date(date)
+    def get_response(channel, user, command_parts):
+        (date, time) = command_parts
+        TIME_ROW = row_from_time(time)
+        DATE_COLUMN = col_from_date(date)
 
-    if TIME_ROW is None and DATE_COLUMN is None:
-        return "Invalid start time and date specified."
-    elif TIME_ROW is None:
-        return "Invalid start time specified."
-    elif DATE_COLUMN is None:
-        return "Invalid date specified."
+        if TIME_ROW is None and DATE_COLUMN is None:
+            return "Invalid start time and date specified."
+        elif TIME_ROW is None:
+            return "Invalid start time specified."
+        elif DATE_COLUMN is None:
+            return "Invalid date specified."
 
-    name = database.id_to_name(user)
-    if name is None:
-        return "ERROR: Please rerun register-users"
+        name = database.id_to_name(user)
+        if name is None:
+            return "ERROR: Please rerun register-users"
 
-    schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-    schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
-    person = None
-    for t, p in zip(schedule_times, schedule_people):
-        print(p.value, name, t)
-        # if p.value.split(" ")[0] == name:
-        if p.value[0:len(name)] == name:
-            person = p
-            break
-        if t.value != "":
-            break
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        person = None
+        for t, p in zip(schedule_times, schedule_people):
+            print(p.value, name, t)
+            # if p.value.split(" ")[0] == name:
+            if p.value[0:len(name)] == name:
+                person = p
+                break
+            if t.value != "":
+                break
 
-    if person is None:
-        return "Either couldn't find you on the schedule, or you are already looking for a substitute.."
+        if person is None:
+            return "Either couldn't find you on the schedule, or you are already looking for a substitute.."
+        return f'If anyone can substitute for <@{user}>, please click the button below'
 
     sheet.update_cell(person.row, person.col, f'{name}*')
-
-    return f'If anyone can substitute for <@{user}>, please respond with *@Shift Manager take-shift <@{user}> {date} {time}*'
+    requests.post(response_url, json={
+        "response_type": 'in_channel',
+        "text": '',
+        "attachments": [{
+            "text": get_response(channel, user, command_parts),
+            "callback_id": f'take-shift|{user}|{date}|{time}',
+            "color": "#3AA3E3",
+            "attachment_type": "default",
+            "actions": [{
+                "name": "take_shift",
+                "text": ":heavy_check_mark: Take Shift",
+                "type": "button",
+                "value": "take_shift"
+            }]
+        }]
+    })
 
 @command
 @channel(["shifts"])
-def unsub(channel, user, command_parts):
+def unsub(channel, user, command_parts, response_url):
     """
     *unsub* <date> <time>
     > Handles shift substitutes
@@ -211,7 +237,12 @@ def unsub(channel, user, command_parts):
 
 @command
 @channel(["shifts"])
-def take_shift(channel, user, command_parts):
+def take_shift(channel, user, command_parts, response_url):
+    take_shift_helper(channel, user, command_parts, response_url)
+    return "Handling shift replacement."
+
+@threaded
+def take_shift_helper(channel, user, command_parts, response_url):
     """
     *take_shift* <user> <date> <time>
     > Handles shift substitutes
@@ -220,43 +251,48 @@ def take_shift(channel, user, command_parts):
     """
     # TODO: add time check for past
     # TODO: check that they aren't already in that shift
-    (user_to_replace, date, time) = command_parts
-    user_to_replace = user_to_replace[2:-1] # gets rid of @<>
-    TIME_ROW = row_from_time(time)
-    DATE_COLUMN = col_from_date(date)
+    def get_response(channel, user, command_parts):
+        (user_to_replace, date, time) = command_parts
+        # user_to_replace = user_to_replace[2:-1].split("|")[0] # gets rid of <@>
+        TIME_ROW = row_from_time(time)
+        DATE_COLUMN = col_from_date(date)
 
-    if TIME_ROW is None and DATE_COLUMN is None:
-        return "Invalid start time and date specified."
-    elif TIME_ROW is None:
-        return "Invalid start time specified."
-    elif DATE_COLUMN is None:
-        return "Invalid date specified."
+        if TIME_ROW is None and DATE_COLUMN is None:
+            return "Invalid start time and date specified."
+        elif TIME_ROW is None:
+            return "Invalid start time specified."
+        elif DATE_COLUMN is None:
+            return "Invalid date specified."
 
-    name = database.id_to_name(user_to_replace)
-    if name is None:
-        return "ERROR: Please rerun register-users"
+        name = database.id_to_name(user_to_replace)
+        if name is None:
+            return "ERROR: Please rerun register-users"
 
-    schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-    schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
-    person = None
-    for t, p in zip(schedule_times, schedule_people):
-        # if p.value.split(" ")[0][:-1] == name:
-        if p.value[0:len(name)] == name:
-            person = p
-            break
-        if t.value != "":
-            break
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        person = None
+        for t, p in zip(schedule_times, schedule_people):
+            # if p.value.split(" ")[0][:-1] == name:
+            if p.value[0:len(name)] == name:
+                person = p
+                break
+            if t.value != "":
+                break
 
-    if person is None:
-        return "Either the user you specified has already found a replacement, or is not looking for one."
+        if person is None:
+            return "Either the user you specified has already found a replacement, or is not looking for one."
 
-    sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)}')
+        sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)}')
+        return f'<@{user_to_replace}>\'s {date} {time} shift replaced by <@{user}>'
 
-    return f'<@{user_to_replace}>\'s {date} {time} shift replaced by <@{user}>'
+    requests.post(response_url, json={
+        "response_type": 'in_channel',
+        "text": get_response(channel, user, command_parts),
+    })
 
 @command
 @channel(["shift-managers"])
-def register_users(channel, user, command_parts):
+def register_users(channel, user, command_parts, response_url):
     """
     *register_users*
     > Registers users to database
@@ -279,51 +315,63 @@ def register_users(channel, user, command_parts):
     return "Registered names to IDs."
 
 @command
+@arguments([3])
 @channel(["shift-managers"])
-def noshow(channel, user, command_parts):
+def noshow(channel, user, command_parts, response_url):
+    noshow_helper(channel, user, command_parts, response_url)
+    return jsonify(
+        text="Handling noshow."
+    )
+
+@threaded
+def noshow_helper(channel, user, command_parts, response_url):
     """
     *noshow* <user>
     > Marks user as noshow on spreadsheet
     """
-    (checkoff_user, date, time) = command_parts
-    checkoff_user = checkoff_user[2:-1] # gets rid of @<>
-    TIME_ROW = row_from_time(time)
-    DATE_COLUMN = col_from_date(date)
+    def get_response(channel, user, command_parts, response_url):
+        (checkoff_user, date, time) = command_parts
+        checkoff_user = checkoff_user[2:-1].split("|")[0] # gets rid of <@>
+        TIME_ROW = row_from_time(time)
+        DATE_COLUMN = col_from_date(date)
 
-    if TIME_ROW is None and DATE_COLUMN is None:
-        return "Invalid start time and date specified."
-    elif TIME_ROW is None:
-        return "Invalid start time specified."
-    elif DATE_COLUMN is None:
-        return "Invalid date specified."
+        if TIME_ROW is None and DATE_COLUMN is None:
+            return "Invalid start time and date specified."
+        elif TIME_ROW is None:
+            return "Invalid start time specified."
+        elif DATE_COLUMN is None:
+            return "Invalid date specified."
 
-    name = database.id_to_name(checkoff_user)
-    if name is None:
-        return "ERROR: Please rerun register-users"
+        name = database.id_to_name(checkoff_user)
+        if name is None:
+            return "ERROR: Please rerun register-users"
 
-    schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-    schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
-    person = None
-    for t, p in zip(schedule_times, schedule_people):
-        # if p.value.split(" ")[0] == name:
-        if p.value[0:len(name)] == name:
-            person = p
-            break
-        if t.value != "":
-            break
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        person = None
+        for t, p in zip(schedule_times, schedule_people):
+            # if p.value.split(" ")[0] == name:
+            if p.value[0:len(name)] == name:
+                person = p
+                break
+            if t.value != "":
+                break
 
-    if person is None:
-        return "Either that user did not have this shift, or is already marked off."
+        if person is None:
+            return "Either that user did not have this shift, or is already marked off."
 
-    sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)} NOSHOW')
+        sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)} NOSHOW')
 
-    return f'<@{checkoff_user}> marked as noshow by <@{user}>'
+        return f'<@{checkoff_user}> marked as noshow by <@{user}>'
 
-    return "Not implemented yet."
+    requests.post(response_url, json={
+        "response_type": 'in_channel',
+        "text": get_response(channel, user, command_parts, response_url)
+    })
 
 @command
 @arguments([0])
-def register_channel(channel, user, command_parts):
+def register_channel(channel, user, command_parts, response_url):
     """
     *register-channel*
     > Registers channel for script to use
@@ -337,52 +385,65 @@ def register_channel(channel, user, command_parts):
 @command
 @arguments([1])
 @channel(["shift-managers", "shifts"])
-def shifts(channel, user, command_parts):
+def shifts(channel, user, command_parts, response_url):
+    shifts_helper(channel, user, command_parts, response_url)
+    return jsonify(
+        text="Finding shifts."
+    )
+
+@threaded
+def shifts_helper(channel, user, command_parts, response_url):
     """
     *shifts* <date>
     > Returns shifts from given date
     """
-    date = command_parts[0]
-    DATE_COLUMN = col_from_date(date)
+    def get_response(channel, user, command_parts):
+        date = command_parts[0]
+        DATE_COLUMN = col_from_date(date)
 
-    if DATE_COLUMN is None:
-        return "Invalid date."
+        if DATE_COLUMN is None:
+            return "Invalid date."
 
-    # Get shifts
-    shifts = {}
-    timeshift_data = sheet.range(FLYERING_ROW_START, DATE_COLUMN, FLYERING_ROW_END, DATE_COLUMN)
-    shift_times = sheet.range(FLYERING_ROW_START, 1, FLYERING_ROW_END, 1)
-    current_time = None
-    current_shifts = []
-    for shift, time in zip(timeshift_data, shift_times):
-        shift, time = shift.value, time.value
-        if time != "":
-            if current_time != None:
-                shifts[current_time] = current_shifts
-            current_time = time
-            current_shifts = []
+        # Get shifts
+        shifts = {}
+        timeshift_data = sheet.range(FLYERING_ROW_START, DATE_COLUMN, FLYERING_ROW_END, DATE_COLUMN)
+        shift_times = sheet.range(FLYERING_ROW_START, 1, FLYERING_ROW_END, 1)
+        current_time = None
+        current_shifts = []
+        for shift, time in zip(timeshift_data, shift_times):
+            shift, time = shift.value, time.value
+            if time != "":
+                if current_time != None:
+                    shifts[current_time] = current_shifts
+                current_time = time
+                current_shifts = []
 
-        user = "N/A"
-        if shift is not "":
-            if shift[-1] == "*":
-                shift = shift[:-1]
-            user_id = database.name_to_id(shift)
-            if user_id:
-                user = f'<@{user_id}>'
-            else:
-                user = shift
-        current_shifts.append(user)
+            user = "N/A"
+            if shift is not "":
+                if shift[-1] == "*":
+                    shift = shift[:-1]
+                user_id = database.name_to_id(shift)
+                if user_id:
+                    user = f'<@{user_id}>'
+                else:
+                    user = shift
+            current_shifts.append(user)
 
-    output = ""
-    for time, shift in shifts.items():
-        people = ", ".join(shift)
-        output += f'*{time}*: {people}\n'
-    return output
+        output = ""
+        for time, shift in shifts.items():
+            people = ", ".join(shift)
+            output += f'*{time}*: {people}\n'
+        return output
+
+    requests.post(response_url, json={
+        "response_type": 'in_channel',
+        "text": get_response(channel, user, command_parts)
+    })
 
 @command
 @channel(["shift-managers"])
 @arguments([0])
-def clean(channel, user, command_parts):
+def clean(channel, user, command_parts, response_url):
     """
     *clean*
     > Drops all databases.
@@ -393,7 +454,7 @@ def clean(channel, user, command_parts):
 
 @command
 @arguments([0])
-def help(channel, user, command_parts):
+def help(channel, user, command_parts, response_url):
     """
     *help*
     > Help pages
@@ -402,7 +463,7 @@ def help(channel, user, command_parts):
 
 @command
 @arguments([0])
-def all_commands(channel, user, command_parts):
+def all_commands(channel, user, command_parts, response_url):
     """
     *all-commands*
     > Prints all commands
@@ -411,6 +472,52 @@ def all_commands(channel, user, command_parts):
     for title, content in decorators.help_pages.items():
         output += f'{content}\n'
     return output
+
+@app.route('/action-endpoint', methods=['POST'])
+def action_endpoint():
+    payload = json.loads(request.form["payload"])
+    (command, *command_parts) = payload["callback_id"].split("|")
+    channel_id = payload["channel"].get("id")
+    user_id = payload["user"].get("id")
+    response_url = payload["response_url"]
+    pprint.pprint(payload)
+    if command in decorators.valid_commands:
+        return decorators.valid_commands[command](
+            channel=channel_id,
+            user=user_id,
+            command_parts=command_parts,
+            response_url=response_url
+        )
+    return "Unimplemented"
+
+@app.route('/commands', methods=['POST'])
+def commands():
+    """
+    Handle slash commands
+    """
+    payload = request.form
+    command = payload.get("command")[1:]
+    text = payload.get("text")
+    response_url = payload.get("response_url")
+    user_id = payload.get("user_id")
+    channel_id = payload.get("channel_id")
+    response_url = payload.get("response_url")
+
+    response = "None"
+    print(text)
+    if command in decorators.valid_commands:
+        response = decorators.valid_commands[command](
+            channel=channel_id,
+            user=user_id,
+            command_parts=(text.split(" ") if text else []),
+            response_url=response_url
+        )
+
+    # http://flask.pocoo.org/docs/1.0/patterns/deferredcallbacks/
+
+    # link to previously written functions
+
+    return response
 
 def main():
     global bot_id
@@ -427,17 +534,10 @@ def main():
     print("CHANNELS:", [record for record in database.channels.find()])
     print("USERS:", [record for record in database.users.find()])
 
-    # slack portion
-    if slack_client.rtm_connect(with_team_state=False):
-        print("VCG ON ME VCG ON 3")
-        bot_id = slack_client.api_call("auth.test")["user_id"]
-        while True:
-            command, channel, user = parse_bot_commands(slack_client.rtm_read())
-            if command:
-                handle_command(command, channel, user)
-            time.sleep(RTM_READ_DELAY)
+    if PROD:
+        app.run()
     else:
-        print("Connection failed. Exception traceback printed above.")
+        app.run()
 
 if __name__ == '__main__':
     try:
@@ -446,3 +546,4 @@ if __name__ == '__main__':
         print('Shutting Down')
     except:
         logging.exception("Fatal Exception Occurred")
+
