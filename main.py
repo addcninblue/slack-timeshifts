@@ -1,8 +1,7 @@
 # slackbot
 import os
-import re
 import datetime
-from flask import Flask, request, after_this_request, jsonify
+from flask import Flask, request, jsonify
 import requests
 from slackclient import SlackClient
 import json
@@ -56,17 +55,21 @@ app = Flask(__name__)
 
 # TODO security: https://api.slack.com/docs/verifying-requests-from-slack
 
+
 def col_from_date(date):
     DATE_COLUMN = None
 
     # look up the correct column
-    schedule_dates = sheet.range(FLYERING_DATES_ROW, FLYERING_DATES_COLUMN_START, FLYERING_DATES_ROW, FLYERING_DATES_COLUMN_END)
+    schedule_dates = sheet.range(FLYERING_DATES_ROW,
+                                 FLYERING_DATES_COLUMN_START,
+                                 FLYERING_DATES_ROW, FLYERING_DATES_COLUMN_END)
     for d in schedule_dates:
         if date in d.value:
             DATE_COLUMN = d.col
             break
 
     return DATE_COLUMN
+
 
 def row_from_time(time):
     TIME_ROW = None
@@ -80,14 +83,14 @@ def row_from_time(time):
 
     return TIME_ROW
 
+
 @command
 @arguments([2])
 @channel(["shifts"])
 def sub(channel, user, command_parts, response_url):
     sub_helper(channel, user, command_parts, response_url)
-    return jsonify(
-        text="Handling substitute."
-    )
+    return jsonify(text="Handling substitute.")
+
 
 @threaded
 def sub_helper(channel, user, command_parts, response_url):
@@ -98,6 +101,7 @@ def sub_helper(channel, user, command_parts, response_url):
     # TODO: add time check for past
     date = None
     time = None
+
     def get_response(channel, user, command_parts):
         nonlocal date, time
         (date, time) = command_parts
@@ -115,8 +119,10 @@ def sub_helper(channel, user, command_parts, response_url):
         if name is None:
             return "ERROR: Please rerun register-users"
 
-        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN,
+                                      TIME_ROW + MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW + 1, 1,
+                                     TIME_ROW + MAX_PER_SHIFT + 1, 1)
         person = None
         for t, p in zip(schedule_times, schedule_people):
             print(p.value, name, t)
@@ -134,35 +140,45 @@ def sub_helper(channel, user, command_parts, response_url):
 
     response = get_response(channel, user, command_parts)
     if response:
-        requests.post(response_url, json={
-            "response_type": 'ephemeral',
-            "text": f'{response}',
-        })
+        requests.post(
+            response_url,
+            json={
+                "response_type": 'ephemeral',
+                "text": f'{response}',
+            })
     else:
-        requests.post(response_url, json={
-            "response_type": 'in_channel',
-            "text": '',
-            "attachments": [{
-                "text": f'<!channel> If anyone can substitute for <@{user}> on {date} {time}, please click the button below.',
-                "callback_id": f'take-shift|{user}|{date}|{time}',
-                "color": "#3AA3E3",
-                "attachment_type": "default",
-                "actions": [{
-                    "name": "take_shift",
-                    "text": ":heavy_check_mark: Take Shift",
-                    "type": "button",
-                    "value": "take_shift"
+        requests.post(
+            response_url,
+            json={
+                "response_type":
+                'in_channel',
+                "text":
+                '',
+                "attachments": [{
+                    "text":
+                    f'<!channel> If anyone can substitute for <@{user}> on {date} {time}, please click the button below.',
+                    "callback_id":
+                    f'take-shift|{user}|{date}|{time}',
+                    "color":
+                    "#3AA3E3",
+                    "attachment_type":
+                    "default",
+                    "actions": [{
+                        "name": "take_shift",
+                        "text": ":heavy_check_mark: Take Shift",
+                        "type": "button",
+                        "value": "take_shift"
+                    }]
                 }]
-            }]
-        })
+            })
+
 
 @command
 @channel(["shifts"])
 def unsub(channel, user, command_parts, response_url):
     unsub_helper(channel, user, command_parts, response_url)
-    return jsonify(
-        text="Deleting your substitute request."
-    )
+    return jsonify(text="Deleting your substitute request.")
+
 
 @threaded
 def unsub_helper(channel, user, command_parts, response_url):
@@ -172,6 +188,7 @@ def unsub_helper(channel, user, command_parts, response_url):
     > user: str (user id)
     > command_parts: tuple of (day, shift time), both str
     """
+
     # TODO: add time check for past
     def get_response(channel, user, command_parts):
         (date, time) = command_parts
@@ -189,8 +206,10 @@ def unsub_helper(channel, user, command_parts, response_url):
         if name is None:
             return "ERROR: Please rerun register-users"
 
-        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN,
+                                      TIME_ROW + MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW + 1, 1,
+                                     TIME_ROW + MAX_PER_SHIFT + 1, 1)
         person = None
         for t, p in zip(schedule_times, schedule_people):
             # if p.value.split(" ")[0][:-1] == name:
@@ -208,16 +227,20 @@ def unsub_helper(channel, user, command_parts, response_url):
         return f'Not looking for substitutes for <@{user}> anymore.'
 
     response = get_response(channel, user, command_parts)
-    requests.post(response_url, json={
-        "response_type": 'in_channel',
-        "text": f'{response}',
-    })
+    requests.post(
+        response_url,
+        json={
+            "response_type": 'in_channel',
+            "text": f'{response}',
+        })
+
 
 @command
 @channel(["shifts"])
 def take_shift(channel, user, command_parts, response_url):
     take_shift_helper(channel, user, command_parts, response_url)
     return "Handling shift replacement."
+
 
 @threaded
 def take_shift_helper(channel, user, command_parts, response_url):
@@ -227,6 +250,7 @@ def take_shift_helper(channel, user, command_parts, response_url):
     > user: str (user id)
     > command_parts: tuple of (day, shift time), both str
     """
+
     # TODO: add time check for past
     # TODO: check that they aren't already in that shift
     def get_response(channel, user, command_parts):
@@ -246,8 +270,10 @@ def take_shift_helper(channel, user, command_parts, response_url):
         if name is None:
             return "ERROR: Please rerun register-users"
 
-        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN,
+                                      TIME_ROW + MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW + 1, 1,
+                                     TIME_ROW + MAX_PER_SHIFT + 1, 1)
         person = None
         for t, p in zip(schedule_times, schedule_people):
             # if p.value.split(" ")[0][:-1] == name:
@@ -260,13 +286,17 @@ def take_shift_helper(channel, user, command_parts, response_url):
         if person is None:
             return "Either the user you specified has already found a replacement, or is not looking for one."
 
-        sheet.update_cell(person.row, person.col, f'{database.id_to_name(user)}')
+        sheet.update_cell(person.row, person.col,
+                          f'{database.id_to_name(user)}')
         return f'<@{user_to_replace}>\'s {date} {time} shift replaced by <@{user}>'
 
-    requests.post(response_url, json={
-        "response_type": 'in_channel',
-        "text": get_response(channel, user, command_parts),
-    })
+    requests.post(
+        response_url,
+        json={
+            "response_type": 'in_channel',
+            "text": get_response(channel, user, command_parts),
+        })
+
 
 @command
 @channel(["shift-managers"])
@@ -292,14 +322,14 @@ def register_users(channel, user, command_parts, response_url):
         database.add_user(user)
     return "Registered names to IDs."
 
+
 @command
 @arguments([3])
 @channel(["shift-managers"])
 def noshow(channel, user, command_parts, response_url):
     noshow_helper(channel, user, command_parts, response_url)
-    return jsonify(
-        text="Handling noshow."
-    )
+    return jsonify(text="Handling noshow.")
+
 
 @threaded
 def noshow_helper(channel, user, command_parts, response_url):
@@ -307,9 +337,10 @@ def noshow_helper(channel, user, command_parts, response_url):
     *noshow* <user>
     > Marks user as noshow on spreadsheet
     """
+
     def get_response(channel, user, command_parts, response_url):
         (checkoff_user, date, time) = command_parts
-        checkoff_user = checkoff_user[2:-1].split("|")[0] # gets rid of <@>
+        checkoff_user = checkoff_user[2:-1].split("|")[0]  # gets rid of <@>
         TIME_ROW = row_from_time(time)
         DATE_COLUMN = col_from_date(date)
 
@@ -324,8 +355,10 @@ def noshow_helper(channel, user, command_parts, response_url):
         if name is None:
             return "ERROR: Please rerun register-users"
 
-        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN, TIME_ROW+MAX_PER_SHIFT, DATE_COLUMN)
-        schedule_times = sheet.range(TIME_ROW+1, 1, TIME_ROW+MAX_PER_SHIFT+1, 1)
+        schedule_people = sheet.range(TIME_ROW, DATE_COLUMN,
+                                      TIME_ROW + MAX_PER_SHIFT, DATE_COLUMN)
+        schedule_times = sheet.range(TIME_ROW + 1, 1,
+                                     TIME_ROW + MAX_PER_SHIFT + 1, 1)
         person = None
         for t, p in zip(schedule_times, schedule_people):
             # if p.value.split(" ")[0] == name:
@@ -338,14 +371,18 @@ def noshow_helper(channel, user, command_parts, response_url):
         if person is None:
             return "Either that user did not have this shift, or is already marked off."
 
-        sheet.update_cell(person.row, person.col, f'{database.id_to_name(checkoff_user)} NOSHOW')
+        sheet.update_cell(person.row, person.col,
+                          f'{database.id_to_name(checkoff_user)} NOSHOW')
 
         return f'<@{checkoff_user}> marked as noshow by <@{user}>'
 
-    requests.post(response_url, json={
-        "response_type": 'in_channel',
-        "text": get_response(channel, user, command_parts, response_url)
-    })
+    requests.post(
+        response_url,
+        json={
+            "response_type": 'in_channel',
+            "text": get_response(channel, user, command_parts, response_url)
+        })
+
 
 @command
 @arguments([0])
@@ -354,20 +391,21 @@ def register_channel(channel, user, command_parts, response_url):
     *register-channel*
     > Registers channel for script to use
     """
-    channel_name = slack_client.api_call("channels.info", channel=channel)["channel"]["name"]
+    channel_name = slack_client.api_call(
+        "channels.info", channel=channel)["channel"]["name"]
     channel_id = channel
     channel = {"name": channel_name, "id": channel_id}
     database.add_channel(channel)
     return f'Channel registered as {channel_id}'
+
 
 @command
 @arguments([1, 2])
 @channel(["shift-managers", "shifts"])
 def shifts(channel, user, command_parts, response_url):
     shifts_helper(channel, user, command_parts, response_url)
-    return jsonify(
-        text="Finding shifts."
-    )
+    return jsonify(text="Finding shifts.")
+
 
 @threaded
 def shifts_helper(channel, user, command_parts, response_url):
@@ -375,6 +413,7 @@ def shifts_helper(channel, user, command_parts, response_url):
     *shifts* <date>
     > Returns shifts from given date
     """
+
     def get_response(channel, user, command_parts):
         date = command_parts[0]
         notify = len(command_parts) == 2 and "notify" in command_parts[1]
@@ -385,7 +424,8 @@ def shifts_helper(channel, user, command_parts, response_url):
 
         # Get shifts
         shifts = {}
-        timeshift_data = sheet.range(FLYERING_ROW_START, DATE_COLUMN, FLYERING_ROW_END, DATE_COLUMN)
+        timeshift_data = sheet.range(FLYERING_ROW_START, DATE_COLUMN,
+                                     FLYERING_ROW_END, DATE_COLUMN)
         shift_times = sheet.range(FLYERING_ROW_START, 1, FLYERING_ROW_END, 1)
         current_time = None
         current_shifts = []
@@ -414,10 +454,13 @@ def shifts_helper(channel, user, command_parts, response_url):
             output += f'*{time}*: {people}\n'
         return output
 
-    requests.post(response_url, json={
-        "response_type": 'in_channel',
-        "text": get_response(channel, user, command_parts)
-    })
+    requests.post(
+        response_url,
+        json={
+            "response_type": 'in_channel',
+            "text": get_response(channel, user, command_parts)
+        })
+
 
 @command
 @channel(["shift-managers"])
@@ -431,6 +474,7 @@ def clean(channel, user, command_parts, response_url):
     database.clean_database()
     return "Cleaned database."
 
+
 @command
 @arguments([0])
 def help(channel, user, command_parts, response_url):
@@ -439,6 +483,7 @@ def help(channel, user, command_parts, response_url):
     > Help pages
     """
     return "*To find sub*: sub <date> <time>\n*To take shift*: take-shift <user> <date> <time>\n*To show shifts*: shifts <today | tomorrow | date>"
+
 
 @command
 @arguments([0])
@@ -451,6 +496,7 @@ def all_commands(channel, user, command_parts, response_url):
     for title, content in decorators.help_pages.items():
         output += f'{content}\n'
     return output
+
 
 @app.route('/action-endpoint', methods=['POST'])
 def action_endpoint():
@@ -465,9 +511,9 @@ def action_endpoint():
             channel=channel_id,
             user=user_id,
             command_parts=command_parts,
-            response_url=response_url
-        )
+            response_url=response_url)
     return "Unimplemented"
+
 
 @app.route('/commands', methods=['POST'])
 def commands():
@@ -489,23 +535,27 @@ def commands():
             channel=channel_id,
             user=user_id,
             command_parts=(text.split(" ") if text else []),
-            response_url=response_url
-        )
+            response_url=response_url)
 
     return response
+
 
 @app.route("/")
 def root():
     return "OK"
+
 
 def main():
     global bot_id
     global sheet
 
     # authenticate with api
-    scope = ['https://spreadsheets.google.com/feeds',
-             'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(os.environ.get('GOOGLE_API_CREDS')), scope)
+    scope = [
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        json.loads(os.environ.get('GOOGLE_API_CREDS')), scope)
     client = gspread.authorize(creds)
     sheet = client.open("Spring 2019 Recruitment Master").sheet1
 
@@ -517,12 +567,7 @@ def main():
         website = os.environ.get('WEBSITE_PROD')
     else:
         website = os.environ.get('WEBSITE_DEBUG')
-    def ping(website):
-        while True:
-            requests.get(website)
-            time.sleep(36000)
-    ping = Thread(target=ping, kwargs={"website": website})
-    ping.start()
+
 
 main()
 
@@ -533,4 +578,3 @@ if __name__ == '__main__':
         print('Shutting Down')
     except:
         logging.exception("Fatal Exception Occurred")
-
