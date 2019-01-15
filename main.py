@@ -40,13 +40,11 @@ else:
 sheet = None
 
 # google sheets constants
-FLYERING_DATES_ROW = 18
+FLYERING_DATES_ROW = 17
 FLYERING_DATES_COLUMN_START = 3
 FLYERING_DATES_COLUMN_END = 11
-FLYERING_ROW_START = 19
-FLYERING_ROW_END = 86
-TABLING_ROW_START = 24
-TABLING_ROW_END = 83
+FLYERING_ROW_START = 18
+FLYERING_ROW_END = 85
 MAX_PER_SHIFT = 4
 # https://github.com/datadesk/slack-buttons-example/blob/master/app.py
 
