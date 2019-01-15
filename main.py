@@ -38,6 +38,7 @@ else:
 
 # instantiate google sheets
 sheet = None
+client = None
 
 # google sheets constants
 FLYERING_DATES_ROW = 17
@@ -102,6 +103,8 @@ def sub_helper(channel, user, command_parts, response_url):
 
     def get_response(channel, user, command_parts):
         nonlocal date, time
+        client.login()
+
         (date, time) = command_parts
         TIME_ROW = row_from_time(time)
         DATE_COLUMN = col_from_date(date)
@@ -189,6 +192,8 @@ def unsub_helper(channel, user, command_parts, response_url):
 
     # TODO: add time check for past
     def get_response(channel, user, command_parts):
+        client.login()
+
         (date, time) = command_parts
         TIME_ROW = row_from_time(time)
         DATE_COLUMN = col_from_date(date)
@@ -252,6 +257,8 @@ def take_shift_helper(channel, user, command_parts, response_url):
     # TODO: add time check for past
     # TODO: check that they aren't already in that shift
     def get_response(channel, user, command_parts):
+        client.login()
+
         (user_to_replace, date, time) = command_parts
         # user_to_replace = user_to_replace[2:-1].split("|")[0] # gets rid of <@>
         TIME_ROW = row_from_time(time)
@@ -337,6 +344,8 @@ def noshow_helper(channel, user, command_parts, response_url):
     """
 
     def get_response(channel, user, command_parts, response_url):
+        client.login()
+
         (checkoff_user, date, time) = command_parts
         checkoff_user = checkoff_user[2:-1].split("|")[0]  # gets rid of <@>
         TIME_ROW = row_from_time(time)
@@ -413,6 +422,8 @@ def shifts_helper(channel, user, command_parts, response_url):
     """
 
     def get_response(channel, user, command_parts):
+        client.login()
+
         date = command_parts[0]
         notify = len(command_parts) == 2 and "notify" in command_parts[1]
         DATE_COLUMN = col_from_date(date)
@@ -545,7 +556,7 @@ def root():
 
 def main():
     global bot_id
-    global sheet
+    global sheet, client
 
     # authenticate with api
     scope = [
