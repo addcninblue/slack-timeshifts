@@ -45,7 +45,7 @@ FLYERING_DATES_ROW = 17
 FLYERING_DATES_COLUMN_START = 3
 FLYERING_DATES_COLUMN_END = 11
 FLYERING_ROW_START = 18
-FLYERING_ROW_END = 85
+FLYERING_ROW_END = 118
 MAX_PER_SHIFT = 4
 # https://github.com/datadesk/slack-buttons-example/blob/master/app.py
 
@@ -436,17 +436,14 @@ def shifts_helper(channel, user, command_parts, response_url):
         timeshift_data = sheet.range(FLYERING_ROW_START, DATE_COLUMN,
                                      FLYERING_ROW_END, DATE_COLUMN)
         shift_times = sheet.range(FLYERING_ROW_START, 1, FLYERING_ROW_END, 1)
-        current_time = None
         current_shifts = []
         for shift, time in zip(timeshift_data, shift_times):
             shift, time = shift.value, time.value
             if time != "":
-                if current_time != None:
-                    shifts[current_time] = current_shifts
-                current_time = time
                 current_shifts = []
+                shifts[time] = current_shifts
 
-            user = "N/A"
+            user = ""
             if shift is not "":
                 if shift[-1] == "*":
                     shift = shift[:-1]
@@ -455,12 +452,15 @@ def shifts_helper(channel, user, command_parts, response_url):
                     user = f'<@{user_id}>'
                 else:
                     user = shift
-            current_shifts.append(user)
+            if user:
+                current_shifts.append(user)
 
         output = f'Shifts for *{date}*:\n'
         for time, shift in shifts.items():
-            people = ", ".join(shift)
-            output += f'*{time}*: {people}\n'
+            if shift:
+                people = ", ".join(shift)
+                time = time.replace("\n", " ")
+                output += f'*{time}*: {people}\n'
         return output
 
     requests.post(
