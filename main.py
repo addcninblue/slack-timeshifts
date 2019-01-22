@@ -41,11 +41,11 @@ sheet = None
 client = None
 
 # google sheets constants
-FLYERING_DATES_ROW = 17
+FLYERING_DATES_ROW = 20
 FLYERING_DATES_COLUMN_START = 3
 FLYERING_DATES_COLUMN_END = 11
-FLYERING_ROW_START = 18
-FLYERING_ROW_END = 118
+FLYERING_ROW_START = 21
+FLYERING_ROW_END = 112
 MAX_PER_SHIFT = 4
 # https://github.com/datadesk/slack-buttons-example/blob/master/app.py
 
@@ -63,6 +63,7 @@ def col_from_date(date):
                                  FLYERING_DATES_COLUMN_START,
                                  FLYERING_DATES_ROW, FLYERING_DATES_COLUMN_END)
     for d in schedule_dates:
+        print(d.value)
         if date in d.value:
             DATE_COLUMN = d.col
             break
