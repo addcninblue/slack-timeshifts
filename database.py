@@ -45,9 +45,9 @@ def load_database():
     global channels, users
 
     if PROD:
-        client = pymongo.MongoClient(URI)
+        client = pymongo.MongoClient(URI, retryWrites=False)
     else:
-        client = pymongo.MongoClient("mongodb://localhost:27017/testing")
+        client = pymongo.MongoClient("mongodb://localhost:27017/testing", retryWrites=False)
     db = client.get_default_database()
 
     # {"name": channel_name, "id": channel_id}

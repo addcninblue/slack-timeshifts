@@ -1,9 +1,8 @@
 # slackbot
 import os
-import datetime
 from flask import Flask, request, jsonify
 import requests
-from slackclient import SlackClient
+import slack
 import json
 
 # gsheets
@@ -20,8 +19,6 @@ import database
 # etc
 import logging
 import pprint
-from threading import Thread
-import time
 
 PROD = int(os.environ.get('PROD'))
 
@@ -30,10 +27,10 @@ PROD = int(os.environ.get('PROD'))
 
 # instantiate Slack client
 if PROD:
-    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_PROD'))
+    slack_client = slack.WebClient(token=os.environ.get('SLACK_BOT_TOKEN_PROD'))
     SLACK_SIGNING_SECRET = os.environ.get("SLACK_BOT_SIGNING_SECRET_PROD")
 else:
-    slack_client = SlackClient(os.environ.get('SLACK_BOT_TOKEN_DEBUG'))
+    slack_client = slack.WebClient(token=os.environ.get('SLACK_BOT_TOKEN_DEBUG'))
     SLACK_SIGNING_SECRET = os.environ.get("SLACK_BOT_SIGNING_SECRET_DEBUG")
 
 # instantiate google sheets
@@ -41,12 +38,17 @@ sheet = None
 client = None
 
 # google sheets constants
-FLYERING_DATES_ROW = 20
+FLYERING_DATES_ROW = 1
 FLYERING_DATES_COLUMN_START = 3
-FLYERING_DATES_COLUMN_END = 11
-FLYERING_ROW_START = 21
-FLYERING_ROW_END = 112
+FLYERING_DATES_COLUMN_END = 10
+FLYERING_ROW_START = 2
+FLYERING_ROW_END = 59
 MAX_PER_SHIFT = 4
+
+# set slack channel constants
+SHIFTS_CHANNEL = os.environ.get("SHIFTS_CHANNEL")
+SHIFT_MANAGERS_CHANNEL = os.environ.get("SHIFT_MANAGERS_CHANNEL")
+
 # https://github.com/datadesk/slack-buttons-example/blob/master/app.py
 
 # Flask
@@ -61,7 +63,9 @@ def col_from_date(date):
     # look up the correct column
     schedule_dates = sheet.range(FLYERING_DATES_ROW,
                                  FLYERING_DATES_COLUMN_START,
-                                 FLYERING_DATES_ROW, FLYERING_DATES_COLUMN_END)
+                                 FLYERING_DATES_ROW,
+                                 FLYERING_DATES_COLUMN_END
+                                 )
     for d in schedule_dates:
         print(d.value)
         if date in d.value:
@@ -86,7 +90,7 @@ def row_from_time(time):
 
 @command
 @arguments([2])
-@channel(["shifts"])
+@channel([SHIFTS_CHANNEL])
 def sub(channel, user, command_parts, response_url):
     sub_helper(channel, user, command_parts, response_url)
     return jsonify(text="Handling substitute.")
@@ -176,7 +180,7 @@ def sub_helper(channel, user, command_parts, response_url):
 
 
 @command
-@channel(["shifts"])
+@channel([SHIFTS_CHANNEL])
 def unsub(channel, user, command_parts, response_url):
     unsub_helper(channel, user, command_parts, response_url)
     return jsonify(text="Deleting your substitute request.")
@@ -240,7 +244,7 @@ def unsub_helper(channel, user, command_parts, response_url):
 
 
 @command
-@channel(["shifts"])
+@channel([SHIFTS_CHANNEL])
 def take_shift(channel, user, command_parts, response_url):
     take_shift_helper(channel, user, command_parts, response_url)
     return "Handling shift replacement."
@@ -305,7 +309,7 @@ def take_shift_helper(channel, user, command_parts, response_url):
 
 
 @command
-@channel(["shift-managers"])
+@channel([SHIFT_MANAGERS_CHANNEL])
 def register_users(channel, user, command_parts, response_url):
     """
     *register_users*
@@ -314,12 +318,12 @@ def register_users(channel, user, command_parts, response_url):
     > In the case of first name collisions, last names will be used.
     > This is to ensure consistency with the spreadsheet
     """
-    members = slack_client.api_call("users.list")["members"]
+    members = slack_client.users_list()["members"]
     for member in members:
-        if member["deleted"]:
+        if member["deleted"] or not member["id"] or not member["profile"]:
             continue
         user_id = member["id"]
-        name = member["real_name"].split(" ")
+        name = member["profile"]["real_name"].split(" ")
         if name[0] != "Neil":
             user_name = name[0]
         else:
@@ -331,7 +335,7 @@ def register_users(channel, user, command_parts, response_url):
 
 @command
 @arguments([3])
-@channel(["shift-managers"])
+@channel([SHIFT_MANAGERS_CHANNEL])
 def noshow(channel, user, command_parts, response_url):
     noshow_helper(channel, user, command_parts, response_url)
     return jsonify(text="Handling noshow.")
@@ -379,8 +383,9 @@ def noshow_helper(channel, user, command_parts, response_url):
         if person is None:
             return "Either that user did not have this shift, or is already marked off."
 
-        sheet.update_cell(person.row, person.col,
+        result = sheet.update_cell(person.row, person.col,
                           f'{database.id_to_name(checkoff_user)} NOSHOW')
+        print(f'RESULT: {result}')
 
         return f'<@{checkoff_user}> marked as noshow by <@{user}>'
 
@@ -399,8 +404,7 @@ def register_channel(channel, user, command_parts, response_url):
     *register-channel*
     > Registers channel for script to use
     """
-    channel_name = slack_client.api_call(
-        "channels.info", channel=channel)["channel"]["name"]
+    channel_name = slack_client.channels_info(channel=channel)["channel"]["name"]
     channel_id = channel
     channel = {"name": channel_name, "id": channel_id}
     database.add_channel(channel)
@@ -409,7 +413,7 @@ def register_channel(channel, user, command_parts, response_url):
 
 @command
 @arguments([1, 2])
-@channel(["shift-managers", "shifts"])
+@channel([SHIFT_MANAGERS_CHANNEL, SHIFTS_CHANNEL])
 def shifts(channel, user, command_parts, response_url):
     shifts_helper(channel, user, command_parts, response_url)
     return jsonify(text="Finding shifts.")
@@ -473,7 +477,7 @@ def shifts_helper(channel, user, command_parts, response_url):
 
 
 @command
-@channel(["shift-managers"])
+@channel([SHIFT_MANAGERS_CHANNEL])
 @arguments([0])
 def clean(channel, user, command_parts, response_url):
     """
@@ -567,17 +571,12 @@ def main():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         json.loads(os.environ.get('GOOGLE_API_CREDS')), scope)
     client = gspread.authorize(creds)
-    sheet = client.open("Spring 2019 Recruitment Master").sheet1
+    sheet = client.open("VCG FA19 Recruitment Tabling Calendar").sheet1
+    print(sheet)
 
     database.load_database()
     print("CHANNELS:", [record for record in database.channels.find()])
     print("USERS:", [record for record in database.users.find()])
-
-    if PROD:
-        website = os.environ.get('WEBSITE_PROD')
-    else:
-        website = os.environ.get('WEBSITE_DEBUG')
-
 
 main()
 
