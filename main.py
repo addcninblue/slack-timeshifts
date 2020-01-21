@@ -37,17 +37,29 @@ else:
 sheet = None
 client = None
 
+# # google sheets constants
+# FLYERING_DATES_ROW = 1
+# FLYERING_DATES_COLUMN_START = 3
+# FLYERING_DATES_COLUMN_END = 10
+# FLYERING_ROW_START = 2
+# FLYERING_ROW_END = 59
+# MAX_PER_SHIFT = 4
+
 # google sheets constants
-FLYERING_DATES_ROW = 1
-FLYERING_DATES_COLUMN_START = 3
-FLYERING_DATES_COLUMN_END = 10
-FLYERING_ROW_START = 2
-FLYERING_ROW_END = 59
-MAX_PER_SHIFT = 4
+
+FLYERING_DATES_ROW = int(os.environ.get("FLYERING_DATES_ROW"))
+FLYERING_DATES_COLUMN_START = int(os.environ.get("FLYERING_DATES_COLUMN_START"))
+FLYERING_DATES_COLUMN_END = int(os.environ.get("FLYERING_DATES_COLUMN_END"))
+FLYERING_ROW_START = int(os.environ.get("FLYERING_ROW_START"))
+FLYERING_ROW_END = int(os.environ.get("FLYERING_ROW_END"))
+MAX_PER_SHIFT = int(os.environ.get("MAX_PER_SHIFT"))
 
 # set slack channel constants
 SHIFTS_CHANNEL = os.environ.get("SHIFTS_CHANNEL")
 SHIFT_MANAGERS_CHANNEL = os.environ.get("SHIFT_MANAGERS_CHANNEL")
+
+# retrieve google doc name
+SHEET_NAME = os.environ.get("SHEET_NAME")
 
 # https://github.com/datadesk/slack-buttons-example/blob/master/app.py
 
@@ -571,7 +583,7 @@ def main():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         json.loads(os.environ.get('GOOGLE_API_CREDS')), scope)
     client = gspread.authorize(creds)
-    sheet = client.open("VCG FA19 Recruitment Tabling Calendar").sheet1
+    sheet = client.open(SHEET_NAME).sheet1
     print(sheet)
 
     database.load_database()
